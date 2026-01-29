@@ -1,27 +1,26 @@
-name: FruityBlox Stock Scraper
+name: FruityBlox Puppeteer Scraper
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Runs every 30 minutes
-  workflow_dispatch:      # Allows manual trigger
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
-  build:
+  scrape:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.9'
+          node-version: '20'
 
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4
+      - name: Install Puppeteer
+        run: npm install puppeteer
 
-      - name: Run bot
+      - name: Run Scraper
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        # Changed this line to bot.py
-        run: python bot.py
+        run: node bot.js
