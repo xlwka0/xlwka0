@@ -9,38 +9,23 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install System Dependencies
+      - name: System Fixes
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgbm-dev \
-            libnss3 \
-            libatk-bridge2.0-0 \
-            libgtk-3-0t64 \
-            libasound2t64 \
-            libxss1 \
-            libxtst6 \
-            libdrm2 \
-            libxkbcommon0 \
-            libxcomposite1 \
-            libxdamage1 \
-            libxrandr2 \
-            libpango-1.0-0 \
-            libcairo2 \
-            libatk1.0-0t64
+          sudo apt-get install -y libgbm-dev libnss3 libatk-bridge2.0-0 libgtk-3-0t64 libasound2t64 libxss1 libxtst6
 
-      - name: Install Puppeteer
+      - name: Install
         run: npm install puppeteer
 
-      - name: Run Scraper
+      - name: Run
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: node bot.js
