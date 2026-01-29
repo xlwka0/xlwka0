@@ -2,6 +2,7 @@ import os
 import requests
 import datetime
 import re
+import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -11,6 +12,24 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
+
+def get_discord_timestamp(relative_time_str):
+    """Converts HH:MM:SS into a Discord Unix timestamp."""
+    try:
+        parts = relative_time_str.split(':')
+        if len(parts) != 3:
+            return "Unknown"
+        
+        # Calculate total seconds from now
+        seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        
+        # Current Unix time + seconds from site
+        future_unix = int(time.time()) + seconds_to_add
+        
+        # Return Discord formatted timestamp (Style 'R' is relative countdown)
+        return f"<t:{future_unix}:R>"
+    except:
+        return "Unknown"
 
 def scrape_fruity_blox():
     if not WEBHOOK_URL:
@@ -29,7 +48,6 @@ def scrape_fruity_blox():
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
         headers = driver.find_elements(By.TAG_NAME, "h2")
-        
         sections_data = {}
         high_value_found = False
 
@@ -38,13 +56,14 @@ def scrape_fruity_blox():
             if "Normal" not in title and "Mirage" not in title:
                 continue
                 
-            # 1. Get Reset Time
+            # 1. Get Reset Time and Convert to Discord Timestamp
             try:
                 parent_section = header.find_element(By.XPATH, "./..")
                 timer_element = parent_section.find_element(By.CLASS_NAME, "tabular-nums")
-                reset_time = timer_element.text.strip()
+                raw_time = timer_element.text.strip()
+                discord_time = get_discord_timestamp(raw_time)
             except:
-                reset_time = "Unknown"
+                discord_time = "Unknown"
 
             # 2. Get Fruits
             stock_list = []
@@ -56,11 +75,9 @@ def scrape_fruity_blox():
                     name = card.find_element(By.TAG_NAME, "h3").text.strip()
                     price_text = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
                     
-                    # Check if value is over 1,000,000
-                    # We remove '$' and ',' to turn "5,000,000" into 5000000
                     numeric_price = re.sub(r'[^\d]', '', price_text)
                     if numeric_price and int(numeric_price) >= 1000000:
-                        name_display = f"🔥 **{name}**" # Highlight high value
+                        name_display = f"🔥 **{name}**"
                         high_value_found = True
                     else:
                         name_display = name
@@ -69,22 +86,21 @@ def scrape_fruity_blox():
             except:
                 pass
             
-            sections_data[title] = {"time": reset_time, "items": stock_list}
+            sections_data[title] = {"time": discord_time, "items": stock_list}
 
         # Construct Message
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # If a fruit >= 1M is found, add an @everyone ping at the top
-        ping = "🔔 @everyone **HIGH VALUE STOCK DETECTED!** 🔔\n" if high_value_found else ""
-        
+        ping = "🔔 @everyone **HIGH VALUE STOCK!** 🔔\n" if high_value_found else ""
         message = f"{ping}🛰️ **FruityBlox Live Stock Update**\n"
 
         for section, data in sections_data.items():
-            message += f"\n**{section}** (Resets in: `{data['time']}`)\n"
+            # Using the Discord timestamp here
+            message += f"\n**{section}** (Resets {data['time']})\n"
             message += "\n".join(data['items']) if data['items'] else "_No stock found._"
             message += "\n"
         
-        message += f"\n*Last Checked: {timestamp}*"
+        # Add a static timestamp for when the message was actually sent
+        now_unix = int(time.time())
+        message += f"\n*Checked at <t:{now_unix}:f>*"
 
         requests.post(WEBHOOK_URL, json={"content": message})
 
