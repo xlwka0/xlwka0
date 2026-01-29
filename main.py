@@ -9,62 +9,58 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Get Webhook from GitHub Secrets
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def scrape_fruity_blox():
     if not WEBHOOK_URL:
-        print("❌ Error: DISCORD_WEBHOOK secret is missing!")
         return
 
-    # 1. Browser Configuration for GitHub (Linux/Headless)
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
-
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        print("🔗 Connecting to FruityBlox...")
         driver.get("https://fruityblox.com/stock")
-        
         wait = WebDriverWait(driver, 20)
-        # Wait for the grid of fruits to appear
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h3")))
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2"))) # Wait for section headers
 
-        # 2. Extract Data
-        # Based on your HTML: Names are in <h3>, Prices in .text-green-400
-        fruit_elements = driver.find_elements(By.CSS_SELECTOR, "a.block.bg-card")
+        # Find all section containers (Normal and Mirage)
+        # Usually, these are grouped by divs or follow a header
+        sections = driver.find_elements(By.XPATH, "//div[contains(@class, 'space-y-6') or contains(@class, 'mb-8')]")
         
-        stock_lines = []
-        for fruit in fruit_elements:
-            try:
-                name = fruit.find_element(By.TAG_NAME, "h3").text.strip()
-                price = fruit.find_element(By.CLASS_NAME, "text-green-400").text.strip()
-                stock_lines.append(f"🍎 **{name}** | 💵 {price}")
-            except:
-                continue
+        final_message = "🛰️ **FruityBlox Live Stock Update**\n"
+        
+        # We'll try to find the two main grids
+        # Normal is usually the first h2, Mirage is the second
+        headers = driver.find_elements(By.TAG_NAME, "h2")
+        grids = driver.find_elements(By.CLASS_NAME, "grid")
 
-        # 3. Prepare Discord Message
+        for i, header in enumerate(headers):
+            header_text = header.text.strip()
+            if "Normal" in header_text or "Mirage" in header_text:
+                final_message += f"\n**{header_text}**:\n"
+                
+                # Get the items specifically inside the grid following this header
+                if i < len(grids):
+                    cards = grids[i].find_elements(By.CSS_SELECTOR, "a.block.bg-card")
+                    for card in cards:
+                        try:
+                            name = card.find_element(By.TAG_NAME, "h3").text.strip()
+                            price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
+                            final_message += f"• {name} | 💵 {price}\n"
+                        except:
+                            continue
+
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        if stock_lines:
-            content = f"🛰️ **FruityBlox Live Stock Update**\n*Last Checked: {timestamp}*\n\n" + "\n".join(stock_lines[:15])
-        else:
-            content = f"⚠️ Checked at {timestamp}, but no stock was found. Layout might have changed!"
+        final_message += f"\n*Last Checked: {timestamp}*"
 
-        # 4. Send to Discord
-        response = requests.post(WEBHOOK_URL, json={"content": content})
-        if response.status_code == 204:
-            print("✅ Successfully sent to Discord!")
-        else:
-            print(f"❌ Discord Error: {response.status_code}")
+        requests.post(WEBHOOK_URL, json={"content": final_message})
 
     except Exception as e:
-        print(f"💥 Scraper Error: {e}")
+        print(f"Error: {e}")
     finally:
         driver.quit()
 
