@@ -4,55 +4,59 @@ async function getStock() {
     console.log("🚀 Launching Browser...");
     const browser = await puppeteer.launch({
         headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-gpu'
+        ]
     });
 
     const page = await browser.newPage();
     try {
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
+        // Use a real browser user agent to avoid being blocked
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         console.log("🌐 Loading FruityBlox Stock...");
+        // Wait until the network is mostly idle
         await page.goto('https://fruityblox.com/stock', { waitUntil: 'networkidle2', timeout: 60000 });
 
-        // Wait for the specific stock elements to load
-        await page.waitForSelector('div', { timeout: 10000 });
+        // IMPORTANT: Wait for any div to appear so we know the page isn't blank
+        await page.waitForSelector('div', { timeout: 15000 });
 
-        console.log("📊 Extracting visual data...");
+        console.log("📊 Extracting visual text...");
         const report = await page.evaluate(() => {
             let finalMsg = "🍎 **FRUITYBLOX LIVE STOCK** 🍎\n";
             
-            // Find all headings (Normal Stock, Mirage Stock)
-            const headings = Array.from(document.querySelectorAll('h2, h1, .text-xl'));
+            // This grabs all elements that might be headers
+            const sections = Array.from(document.querySelectorAll('h1, h2, h3, div'));
             
-            headings.forEach(h => {
-                const title = h.innerText.toUpperCase();
-                if (title.includes('STOCK')) {
-                    finalMsg += `\n**--- ${title} ---**\n`;
-                    
-                    // Look for the next reset time near this heading
-                    const container = h.parentElement;
-                    const timer = container.innerText.match(/\d{1,2}:\d{2}:\d{2}/) || ["Unknown"];
-                    finalMsg += `🕒 Reset: ${timer[0]}\n`;
-
-                    // Get all fruits in this specific section
-                    const fruits = Array.from(container.querySelectorAll('div'))
-                        .map(d => d.innerText)
-                        .filter(txt => txt.length > 2 && !txt.includes(':') && !txt.includes('Stock'));
-                    
-                    if (fruits.length > 0) {
-                        finalMsg += fruits.map(f => `• ${f}`).join('\n') + '\n';
-                    } else {
-                        finalMsg += "_Data loading... check back soon._\n";
+            // Look for "Normal Stock" or "Mirage Stock" in the text
+            sections.forEach(el => {
+                const text = el.innerText.toUpperCase();
+                if ((text.includes('NORMAL') || text.includes('MIRAGE')) && text.includes('STOCK')) {
+                    // Get the text from the box containing this stock
+                    const parent = el.closest('div'); 
+                    if (parent) {
+                        finalMsg += `\n**--- ${text} ---**\n`;
+                        // Extract fruit names (usually lines that don't have ":" in them)
+                        const lines = parent.innerText.split('\n')
+                            .filter(line => line.length > 3 && !line.includes('Stock') && !line.includes('Next Reset'));
+                        
+                        finalMsg += lines.join('\n') + '\n';
                     }
                 }
             });
             return finalMsg;
         });
 
+        // If the report is empty, the scraper failed to find the text
+        if (report.length < 50) throw new Error("Could not find stock text on page.");
         return report;
 
     } catch (e) {
-        return `⚠️ **Scraper Error:** Site might be loading slowly or structure changed. (${e.message})`;
+        console.error("❌ Scraper Error:", e.message);
+        return `⚠️ **Scraper Error:** The site structure changed. (${e.message})`;
     } finally {
         await browser.close();
     }
