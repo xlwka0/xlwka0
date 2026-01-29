@@ -13,6 +13,7 @@ WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def scrape_fruity_blox():
     if not WEBHOOK_URL:
+        print("Missing Webhook URL")
         return
 
     options = Options()
@@ -25,50 +26,59 @@ def scrape_fruity_blox():
     try:
         driver.get("https://fruityblox.com/stock")
         wait = WebDriverWait(driver, 20)
-        
-        # Wait for the main content to load
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
-        # We will find the parent containers for "Normal" and "Mirage"
-        # Based on the site structure, we look for headers and their sibling grids
         headers = driver.find_elements(By.TAG_NAME, "h2")
         
-        normal_stock = []
-        mirage_stock = []
+        # We'll store strings to build the final message
+        sections_data = {}
 
         for header in headers:
             title = header.text.strip()
-            # Find the very next 'grid' element after this header
+            if "Normal" not in title and "Mirage" not in title:
+                continue
+                
+            # 1. Get the Reset Time for this specific section
+            # Logic: Look for the span with tabular-nums near this header
             try:
-                # This XPath finds the first grid that comes after the specific header
+                # We look at the parent container of the header to find the timer inside it
+                parent_section = header.find_element(By.XPATH, "./..")
+                timer_element = parent_section.find_element(By.CLASS_NAME, "tabular-nums")
+                reset_time = timer_element.text.strip()
+            except:
+                reset_time = "Unknown"
+
+            # 2. Get the Fruits for this specific section
+            stock_list = []
+            try:
                 grid = header.find_element(By.XPATH, "./following-sibling::div[contains(@class, 'grid')]")
                 cards = grid.find_elements(By.CSS_SELECTOR, "a.block.bg-card")
                 
                 for card in cards:
                     name = card.find_element(By.TAG_NAME, "h3").text.strip()
                     price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
-                    item_str = f"• {name} | 💵 {price}"
-                    
-                    if "Normal" in title:
-                        normal_stock.append(item_str)
-                    elif "Mirage" in title:
-                        mirage_stock.append(item_str)
+                    stock_list.append(f"• {name} | 💵 {price}")
             except:
-                continue
+                pass
+            
+            sections_data[title] = {"time": reset_time, "items": stock_list}
 
-        # Construct the Message
+        # Construct the Discord Message
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        message_content = "🛰️ **FruityBlox Live Stock Update**\n"
-        
-        message_content += "\n**Normal:**\n"
-        message_content += "\n".join(normal_stock) if normal_stock else "None found"
-        
-        message_content += "\n\n**Mirage:**\n"
-        message_content += "\n".join(mirage_stock) if mirage_stock else "None found"
-        
-        message_content += f"\n\n*Last Checked: {timestamp}*"
+        message = "🛰️ **FruityBlox Live Stock Update**\n"
 
-        requests.post(WEBHOOK_URL, json={"content": message_content})
+        for section, data in sections_data.items():
+            message += f"\n**{section}** (Resets in: `{data['time']}`)\n"
+            if data['items']:
+                message += "\n".join(data['items'])
+            else:
+                message += "_No stock found._"
+            message += "\n"
+        
+        message += f"\n*Last Checked: {timestamp}*"
+
+        requests.post(WEBHOOK_URL, json={"content": message})
+        print("Successfully sent to Discord!")
 
     except Exception as e:
         print(f"Scraper Error: {e}")
