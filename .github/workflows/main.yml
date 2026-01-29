@@ -2,8 +2,8 @@ name: FruityBlox Stock Scraper
 
 on:
   schedule:
-    - cron: '0 * * * *' # This runs every hour on the dot
-  workflow_dispatch:      # This adds a "Run" button for manual testing
+    - cron: '*/30 * * * *' # Runs every 30 minutes
+  workflow_dispatch:      # Allows manual trigger
 
 jobs:
   build:
@@ -20,7 +20,8 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: Run scraper
+      - name: Run bot
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python scraper.py
+        # Changed this line to bot.py
+        run: python bot.py
