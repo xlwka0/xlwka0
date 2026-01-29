@@ -1,21 +1,33 @@
-name: FruityBlox Puppeteer Scraper
+name: FruityBlox Stock Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '*/30 * * * *' # Runs every 30 minutes
+  workflow_dispatch:      # Manual trigger button
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgbm-dev \
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libasound2 \
+            libxss1 \
+            libxtst6
 
       - name: Install Puppeteer
         run: npm install puppeteer
