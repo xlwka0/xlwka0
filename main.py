@@ -14,13 +14,17 @@ from webdriver_manager.chrome import ChromeDriverManager
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def get_unix_time(relative_time_str):
+    """Converts HH:MM:SS to a 10-digit Unix timestamp."""
     try:
-        # Matches HH:MM:SS or H:MM:SS
         parts = relative_time_str.strip().split(':')
         if len(parts) != 3: return None
+        # Calculate total seconds until reset
         seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        # Discord needs an integer for the timestamp
         return int(time.time()) + seconds_to_add
-    except: return None
+    except Exception as e:
+        print(f"Timer error: {e}")
+        return None
 
 def scrape_fruity_blox():
     if not WEBHOOK_URL: return
@@ -34,26 +38,21 @@ def scrape_fruity_blox():
     try:
         driver.get("https://fruityblox.com/stock")
         wait = WebDriverWait(driver, 20)
-        
-        # Wait for the main stock headers to appear
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
-        # --- 1. NEW PRECISION TIMER LOGIC ---
-        # We find the section header (h2), then look for the specific timer class nearby
+        # --- 1. GET TIMERS ---
         timers = {"Normal": "Unknown", "Mirage": "Unknown"}
-        
         for stock_type in ["Normal", "Mirage"]:
             try:
-                # Find h2 containing 'Normal' or 'Mirage', then find the font-mono span in the same parent area
+                # Find the h2 section and locate the font-mono time next to it
                 timer_xpath = f"//h2[contains(text(), '{stock_type}')]/..//span[contains(@class, 'font-mono')]"
-                timer_element = driver.find_element(By.XPATH, timer_xpath)
-                raw_time = timer_element.text.strip()
+                raw_time = driver.find_element(By.XPATH, timer_xpath).text.strip()
                 
                 unix_ts = get_unix_time(raw_time)
                 if unix_ts:
-                    timers[stock_type] = f"in <t:{unix_ts}:R>"
-            except:
-                pass
+                    # THE FIX: Ensure it is a raw string <t:UNIX:R> for Discord to parse
+                    timers[stock_type] = f"<t:{unix_ts}:R>"
+            except: pass
 
         # --- 2. GET FRUITS ---
         headers = driver.find_elements(By.TAG_NAME, "h2")
@@ -73,6 +72,7 @@ def scrape_fruity_blox():
                     price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
                     val = int(re.sub(r'[^\d]', '', price))
 
+                    # Formatting: Vulcan Dot • Price
                     if val >= 1000000:
                         stock_lines.append(f"🔥 **{name}** • 🟢 `${price}`")
                         high_value_alert = True
@@ -80,18 +80,21 @@ def scrape_fruity_blox():
                         stock_lines.append(f"▫️ {name} • `${price}`")
             except: pass
 
-            # Match the Vulcan-style formatting
+            # Formatting logic for the Vulcan look
             stock_key = "Normal" if "Normal" in title else "Mirage"
-            current_ts = timers[stock_key]
+            current_relative_time = timers[stock_key]
+            
+            # Vulcan divider line
             description = "\n".join(stock_lines) + "\n" + "─" * 25
             
             embeds.append({
                 "title": f"Current {title} Stock",
                 "description": description,
                 "color": 2829617,
-                "footer": {"text": f"🕒 Stock Change in - {current_ts}"}
+                "footer": {"text": f"🕒 Stock Change {current_relative_time}"}
             })
 
+        # Send both cards in ONE message
         payload = {"embeds": embeds}
         if high_value_alert:
             payload["content"] = "🚨 **High Value Stock Alert!** @everyone"
