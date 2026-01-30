@@ -14,7 +14,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def get_unix_timestamp(relative_str):
-    """Converts '3:49:50' into a Discord timestamp."""
     try:
         nums = re.findall(r'\d+', relative_str)
         if len(nums) == 3:
@@ -27,15 +26,11 @@ def get_tab_data(driver, url, stock_type):
     driver.get(url)
     wait = WebDriverWait(driver, 20)
     
-    # Wait for content to load
     try:
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "p.font-bold.mt-1")))
-    except:
-        print(f"Timeout on {url}")
+    except: pass
 
-    # 1. Timer Logic (Precision XPath)
-    # We look for the span that says "Next normal stock" or "Next mirage stock"
-    # then grab the bold sibling next to it.
+    # Timer Logic
     try:
         xpath_query = f"//span[contains(text(), 'Next {stock_type.lower()} stock')]/following-sibling::span"
         timer_el = driver.find_element(By.XPATH, xpath_query)
@@ -44,7 +39,7 @@ def get_tab_data(driver, url, stock_type):
     except:
         time_display = "Unknown"
 
-    # 2. Fruit Logic
+    # Fruit Logic
     stock_list = []
     high_value_alert = False
     items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center")
@@ -52,11 +47,8 @@ def get_tab_data(driver, url, stock_type):
     for item in items:
         try:
             name = item.find_element(By.CSS_SELECTOR, "p.font-bold.mt-1").text.strip()
-            if not name: continue 
-            
             price_text = item.find_element(By.CSS_SELECTOR, "p.text-sm.font-bold").text.strip()
             
-            # Price Conversion
             clean_price = price_text.upper().replace('$', '')
             num_match = re.findall(r"[-+]?\d*\.\d+|\d+", clean_price)
             if num_match:
@@ -64,13 +56,13 @@ def get_tab_data(driver, url, stock_type):
                 if 'M' in clean_price: val *= 1_000_000
                 elif 'K' in clean_price: val *= 1_000
                 
+                # Matching the screenshot style: Name • $ Price
                 if val >= 1000000:
-                    stock_list.append(f"🔥 **{name}** | `${price_text}`")
+                    stock_list.append(f"🔥 **{name}** • 🟢 `${price_text}`")
                     high_value_alert = True
                 else:
-                    stock_list.append(f"• {name} | `${price_text}`")
-        except:
-            continue
+                    stock_list.append(f"▫️ {name} • `${price_text}`")
+        except: continue
 
     return {"time": time_display, "items": stock_list, "alert": high_value_alert}
 
@@ -86,36 +78,36 @@ def run_scraper():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        # We pass 'normal' and 'mirage' to the function to help it find the right timer
         normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal", "normal")
         mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage", "mirage")
 
         embed = {
-            "title": "🎮 Gamersberg Blox Fruits Stock",
-            "url": "https://www.gamersberg.com/blox-fruits/stock",
-            "color": 3447003,
+            "title": "Current Stock Status",
+            "color": 2829617, # Dark Slate color like the screenshot
             "fields": [
                 {
                     "name": "📦 Normal Stock",
-                    "value": f"Resets {normal['time']}\n" + ("\n".join(normal['items']) if normal['items'] else "_No data_"),
-                    "inline": True
+                    "value": "\n".join(normal['items']) if normal['items'] else "_No Stock_",
+                    "inline": False
                 },
                 {
                     "name": "🌌 Mirage Stock",
-                    "value": f"Resets {mirage['time']}\n" + ("\n".join(mirage['items']) if mirage['items'] else "_No data_"),
-                    "inline": True
+                    "value": "\n".join(mirage['items']) if mirage['items'] else "_No Stock_",
+                    "inline": False
                 }
             ],
-            "footer": {"text": "Gamersberg Real-Time Tracker"},
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+            # Single footer showing both timers like the "Stock Change in" row
+            "footer": {
+                "text": f"🕒 Normal Change: {normal['time'].replace('<t:','').replace(':R>','')} | Mirage Change: {mirage['time'].replace('<t:','').replace(':R>','')}"
+            }
         }
 
+        # Use a more subtle alert message
         payload = {"embeds": [embed]}
         if normal['alert'] or mirage['alert']:
-            payload["content"] = "🚨 **High Value Fruit Found!** @everyone"
+            payload["content"] = "🚨 **High Value Stock Alert!** @everyone"
 
         requests.post(WEBHOOK_URL, json=payload)
-
     finally:
         driver.quit()
 
