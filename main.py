@@ -10,7 +10,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def get_unix_time(relative_time_str):
-    """Converts HH:MM:SS to a future Unix timestamp for Discord."""
     try:
         parts = relative_time_str.strip().split(':')
         if len(parts) != 3: return None
@@ -29,7 +28,6 @@ def scrape_fruity_blox():
         wait = WebDriverWait(driver, 20)
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
-        # --- 1. GET TIMERS ---
         timers = {"Normal": "Unknown", "Mirage": "Unknown"}
         for stock_type in ["Normal", "Mirage"]:
             try:
@@ -37,11 +35,9 @@ def scrape_fruity_blox():
                 raw_time = driver.find_element(By.XPATH, timer_xpath).text.strip()
                 unix_ts = get_unix_time(raw_time)
                 if unix_ts:
-                    # Using the :R flag for a live relative countdown.
                     timers[stock_type] = f"<t:{unix_ts}:R>"
             except: pass
 
-        # --- 2. GET FRUITS ---
         headers = driver.find_elements(By.TAG_NAME, "h2")
         embeds = []
         high_value_alert = False
@@ -68,15 +64,15 @@ def scrape_fruity_blox():
 
             stock_key = "Normal" if "Normal" in title_text else "Mirage"
             
-            # --- THE VULCAN LAYOUT ---
-            # Timer is placed inside the description under the horizontal line for guaranteed rendering.
+            # --- THE SUBTEXT FIX ---
+            # Using -# to make the timer line significantly smaller
             description = "\n".join(stock_lines)
-            description += f"\n──────────────────\n🕒 **Stock Change {timers[stock_key]}**"
+            description += f"\n──────────────────\n-# 🕒 Stock Change {timers[stock_key]}"
             
             embeds.append({
                 "title": f"Current {stock_key} Stock",
                 "description": description,
-                "color": 2829617, # Dark theme color
+                "color": 2829617,
                 "footer": {"text": "FruityBlox Live Stats"}
             })
 
