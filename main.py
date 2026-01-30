@@ -13,101 +13,83 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
-def get_unix_timestamp(relative_str):
+def get_unix_time(relative_time_str):
     try:
-        nums = re.findall(r'\d+', relative_str)
-        if len(nums) == 3:
-            h, m, s = map(int, nums)
-            return int(time.time()) + (h * 3600) + (m * 60) + s
+        parts = relative_time_str.split(':')
+        if len(parts) != 3: return None
+        seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return int(time.time()) + seconds_to_add
     except: return None
-    return None
 
-def get_tab_data(driver, url, stock_type):
-    driver.get(url)
-    wait = WebDriverWait(driver, 20)
-    try:
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "p.font-bold.mt-1")))
-    except: pass
-
-    # Timer Logic
-    try:
-        xpath_query = f"//span[contains(text(), 'Next {stock_type.lower()} stock')]/following-sibling::span"
-        timer_el = driver.find_element(By.XPATH, xpath_query)
-        unix_time = get_unix_timestamp(timer_el.text.strip())
-        time_display = f"in <t:{unix_time}:R>" if unix_time else "Unknown"
-    except:
-        time_display = "Unknown"
-
-    # Fruit Logic
-    stock_lines = []
-    high_value_alert = False
-    items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center")
-    
-    for item in items:
-        try:
-            name = item.find_element(By.CSS_SELECTOR, "p.font-bold.mt-1").text.strip()
-            price_text = item.find_element(By.CSS_SELECTOR, "p.text-sm.font-bold").text.strip()
-            
-            clean_price = price_text.upper().replace('$', '')
-            num_match = re.findall(r"[-+]?\d*\.\d+|\d+", clean_price)
-            if num_match:
-                val = float(num_match[0])
-                if 'M' in clean_price: val *= 1_000_000
-                elif 'K' in clean_price: val *= 1_000
-                
-                # Using the specific bullet points and line style from your reference
-                if val >= 1000000:
-                    stock_lines.append(f"🔥 **{name}** • 🟢 `${price_text}`")
-                    high_value_alert = True
-                else:
-                    stock_lines.append(f"▫️ {name} • `${price_text}`")
-        except: continue
-
-    # Create the horizontal line separator
-    content = "\n".join(stock_lines) + "\n" + "─" * 25
-    
-    return {"time": time_display, "content": content, "alert": high_value_alert}
-
-def run_scraper():
+def scrape_fruity_blox():
     if not WEBHOOK_URL: return
 
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal", "normal")
-        mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage", "mirage")
+        driver.get("https://fruityblox.com/stock")
+        wait = WebDriverWait(driver, 20)
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
-        # EMBED 1: Normal Stock
-        embed_normal = {
-            "title": "Current Normal Stock",
-            "description": normal['content'],
-            "color": 2829617,
-            "footer": {"text": f"🕒 Stock Change in - {normal['time']}"}
-        }
+        # --- 1. GET TIMERS ---
+        try:
+            n_timer = driver.find_element(By.XPATH, "//div[contains(@class, 'bg-blue-500')]//div[contains(@class, 'font-mono')]").text.strip()
+            normal_ts = f"in <t:{get_unix_time(n_timer)}:R>"
+        except: normal_ts = "Unknown"
 
-        # EMBED 2: Mirage Stock
-        embed_mirage = {
-            "title": "Current Mirage Stock",
-            "description": mirage['content'],
-            "color": 2829617,
-            "footer": {"text": f"🕒 Stock Change in - {mirage['time']}"}
-        }
+        try:
+            m_timer = driver.find_element(By.XPATH, "//div[contains(@class, 'bg-purple-500')]//div[contains(@class, 'font-mono')]").text.strip()
+            mirage_ts = f"in <t:{get_unix_time(m_timer)}:R>"
+        except: mirage_ts = "Unknown"
 
-        payload = {"embeds": [embed_normal, embed_mirage]}
-        
-        # Ping check
-        if normal['alert'] or mirage['alert']:
+        # --- 2. GET FRUITS ---
+        headers = driver.find_elements(By.TAG_NAME, "h2")
+        embeds = []
+        high_value_alert = False
+
+        for header in headers:
+            title = header.text.strip()
+            if "Normal" not in title and "Mirage" not in title: continue
+            
+            stock_lines = []
+            try:
+                grid = header.find_element(By.XPATH, "./following-sibling::div[contains(@class, 'grid')]")
+                cards = grid.find_elements(By.CSS_SELECTOR, "a.block.bg-card")
+                for card in cards:
+                    name = card.find_element(By.TAG_NAME, "h3").text.strip()
+                    price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
+                    val = int(re.sub(r'[^\d]', '', price))
+
+                    if val >= 1000000:
+                        stock_lines.append(f"🔥 **{name}** • 🟢 `${price}`")
+                        high_value_alert = True
+                    else:
+                        stock_lines.append(f"▫️ {name} • `${price}`")
+            except: pass
+
+            # Formatting logic for the "Vulcan" look
+            current_ts = normal_ts if "Normal" in title else mirage_ts
+            description = "\n".join(stock_lines) + "\n" + "─" * 25
+            
+            embeds.append({
+                "title": f"Current {title} Stock",
+                "description": description,
+                "color": 2829617,
+                "footer": {"text": f"🕒 Stock Change in - {current_ts}"}
+            })
+
+        payload = {"embeds": embeds}
+        if high_value_alert:
             payload["content"] = "🚨 **High Value Stock Alert!** @everyone"
 
         requests.post(WEBHOOK_URL, json=payload)
+
     finally:
         driver.quit()
 
 if __name__ == "__main__":
-    run_scraper()
+    scrape_fruity_blox()
