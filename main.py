@@ -25,7 +25,6 @@ def get_unix_timestamp(relative_str):
 def get_tab_data(driver, url, stock_type):
     driver.get(url)
     wait = WebDriverWait(driver, 20)
-    
     try:
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "p.font-bold.mt-1")))
     except: pass
@@ -35,12 +34,12 @@ def get_tab_data(driver, url, stock_type):
         xpath_query = f"//span[contains(text(), 'Next {stock_type.lower()} stock')]/following-sibling::span"
         timer_el = driver.find_element(By.XPATH, xpath_query)
         unix_time = get_unix_timestamp(timer_el.text.strip())
-        time_display = f"<t:{unix_time}:R>" if unix_time else "Unknown"
+        time_display = f"in <t:{unix_time}:R>" if unix_time else "Unknown"
     except:
         time_display = "Unknown"
 
     # Fruit Logic
-    stock_list = []
+    stock_lines = []
     high_value_alert = False
     items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center")
     
@@ -56,15 +55,18 @@ def get_tab_data(driver, url, stock_type):
                 if 'M' in clean_price: val *= 1_000_000
                 elif 'K' in clean_price: val *= 1_000
                 
-                # Matching the screenshot style: Name • $ Price
+                # Using the specific bullet points and line style from your reference
                 if val >= 1000000:
-                    stock_list.append(f"🔥 **{name}** • 🟢 `${price_text}`")
+                    stock_lines.append(f"🔥 **{name}** • 🟢 `${price_text}`")
                     high_value_alert = True
                 else:
-                    stock_list.append(f"▫️ {name} • `${price_text}`")
+                    stock_lines.append(f"▫️ {name} • `${price_text}`")
         except: continue
 
-    return {"time": time_display, "items": stock_list, "alert": high_value_alert}
+    # Create the horizontal line separator
+    content = "\n".join(stock_lines) + "\n" + "─" * 25
+    
+    return {"time": time_display, "content": content, "alert": high_value_alert}
 
 def run_scraper():
     if not WEBHOOK_URL: return
@@ -81,29 +83,25 @@ def run_scraper():
         normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal", "normal")
         mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage", "mirage")
 
-        embed = {
-            "title": "Current Stock Status",
-            "color": 2829617, # Dark Slate color like the screenshot
-            "fields": [
-                {
-                    "name": "📦 Normal Stock",
-                    "value": "\n".join(normal['items']) if normal['items'] else "_No Stock_",
-                    "inline": False
-                },
-                {
-                    "name": "🌌 Mirage Stock",
-                    "value": "\n".join(mirage['items']) if mirage['items'] else "_No Stock_",
-                    "inline": False
-                }
-            ],
-            # Single footer showing both timers like the "Stock Change in" row
-            "footer": {
-                "text": f"🕒 Normal Change: {normal['time'].replace('<t:','').replace(':R>','')} | Mirage Change: {mirage['time'].replace('<t:','').replace(':R>','')}"
-            }
+        # EMBED 1: Normal Stock
+        embed_normal = {
+            "title": "Current Normal Stock",
+            "description": normal['content'],
+            "color": 2829617,
+            "footer": {"text": f"🕒 Stock Change in - {normal['time']}"}
         }
 
-        # Use a more subtle alert message
-        payload = {"embeds": [embed]}
+        # EMBED 2: Mirage Stock
+        embed_mirage = {
+            "title": "Current Mirage Stock",
+            "description": mirage['content'],
+            "color": 2829617,
+            "footer": {"text": f"🕒 Stock Change in - {mirage['time']}"}
+        }
+
+        payload = {"embeds": [embed_normal, embed_mirage]}
+        
+        # Ping check
         if normal['alert'] or mirage['alert']:
             payload["content"] = "🚨 **High Value Stock Alert!** @everyone"
 
