@@ -26,7 +26,6 @@ def scrape():
     
     try:
         driver.get("https://fruityblox.com/stock")
-        # WAIT specifically for the fruit names to appear
         wait = WebDriverWait(driver, 15)
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "h3")))
         
@@ -44,27 +43,27 @@ def scrape():
             except: ts = "Unknown"
 
             lines = []
-            # Find the grid container immediately following the H2 header
             grid = header.find_element(By.XPATH, "./following-sibling::div[1]")
-            cards = grid.find_elements(By.TAG_NAME, "a") # Get all fruit links
+            cards = grid.find_elements(By.TAG_NAME, "a")
             
             for card in cards:
                 try:
                     name = card.find_element(By.TAG_NAME, "h3").text.strip()
                     price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
-                    if not name: continue # Skip if name is empty
+                    if not name: continue
                     
                     val = int(re.sub(r'[^\d]', '', price))
-                    line = f"**{name} • `{price}`**"
+                    line = f"**{name} | `{price}`**"
                     if val >= 1000000:
                         line = "🔥 " + line
                         high_value = True
                     lines.append(line)
                 except: continue
 
-            if lines: # Only add embed if fruits were actually found
+            if lines:
+                # Using standard dashes (---) instead of special unicode lines
                 embeds_data.append({
-                    "description": f"**Current {title}**\n" + "─" * 15 + "\n" + "\n".join(lines) + "\n" + "─" * 15 + f"\n-# **Stock Change** - {ts}",
+                    "description": f"**Current {title}**\n------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
                     "color": 2829617 
                 })
 
@@ -74,9 +73,6 @@ def scrape():
                 "embeds": embeds_data
             }
             requests.post(TARGET_URL, json=payload, timeout=15)
-            print("Successfully sent data with fruits!")
-        else:
-            print("Scraper ran but found no fruits. Check selectors.")
 
     finally:
         driver.quit()
