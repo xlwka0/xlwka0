@@ -15,7 +15,8 @@ WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def get_unix_time(relative_time_str):
     try:
-        parts = relative_time_str.split(':')
+        # Matches HH:MM:SS or H:MM:SS
+        parts = relative_time_str.strip().split(':')
         if len(parts) != 3: return None
         seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
         return int(time.time()) + seconds_to_add
@@ -33,18 +34,26 @@ def scrape_fruity_blox():
     try:
         driver.get("https://fruityblox.com/stock")
         wait = WebDriverWait(driver, 20)
+        
+        # Wait for the main stock headers to appear
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
-        # --- 1. GET TIMERS ---
-        try:
-            n_timer = driver.find_element(By.XPATH, "//div[contains(@class, 'bg-blue-500')]//div[contains(@class, 'font-mono')]").text.strip()
-            normal_ts = f"in <t:{get_unix_time(n_timer)}:R>"
-        except: normal_ts = "Unknown"
-
-        try:
-            m_timer = driver.find_element(By.XPATH, "//div[contains(@class, 'bg-purple-500')]//div[contains(@class, 'font-mono')]").text.strip()
-            mirage_ts = f"in <t:{get_unix_time(m_timer)}:R>"
-        except: mirage_ts = "Unknown"
+        # --- 1. NEW PRECISION TIMER LOGIC ---
+        # We find the section header (h2), then look for the specific timer class nearby
+        timers = {"Normal": "Unknown", "Mirage": "Unknown"}
+        
+        for stock_type in ["Normal", "Mirage"]:
+            try:
+                # Find h2 containing 'Normal' or 'Mirage', then find the font-mono span in the same parent area
+                timer_xpath = f"//h2[contains(text(), '{stock_type}')]/..//span[contains(@class, 'font-mono')]"
+                timer_element = driver.find_element(By.XPATH, timer_xpath)
+                raw_time = timer_element.text.strip()
+                
+                unix_ts = get_unix_time(raw_time)
+                if unix_ts:
+                    timers[stock_type] = f"in <t:{unix_ts}:R>"
+            except:
+                pass
 
         # --- 2. GET FRUITS ---
         headers = driver.find_elements(By.TAG_NAME, "h2")
@@ -71,8 +80,9 @@ def scrape_fruity_blox():
                         stock_lines.append(f"▫️ {name} • `${price}`")
             except: pass
 
-            # Formatting logic for the "Vulcan" look
-            current_ts = normal_ts if "Normal" in title else mirage_ts
+            # Match the Vulcan-style formatting
+            stock_key = "Normal" if "Normal" in title else "Mirage"
+            current_ts = timers[stock_key]
             description = "\n".join(stock_lines) + "\n" + "─" * 25
             
             embeds.append({
