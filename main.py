@@ -14,59 +14,65 @@ from webdriver_manager.chrome import ChromeDriverManager
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
 def get_unix_timestamp(relative_str):
-    """Parses time strings like '01h 05m 10s' or '01:05:10' into Discord Unix."""
     try:
-        # Extract all numbers from the string
+        # Matches formats like "00:41:11" or "00h 41m 11s"
         nums = re.findall(r'\d+', relative_str)
         if len(nums) == 3:
             h, m, s = map(int, nums)
-            total_seconds = (h * 3600) + (m * 60) + s
-            return int(time.time()) + total_seconds
-    except:
-        return None
+            return int(time.time()) + (h * 3600) + (m * 60) + s
+    except: return None
     return None
 
-def get_tab_data(driver, url, label):
+def get_tab_data(driver, url):
     driver.get(url)
-    wait = WebDriverWait(driver, 15)
+    wait = WebDriverWait(driver, 20)
     
-    # Wait for the stock items to load
-    wait.until(EC.presence_of_element_located((By.TAG_NAME, "img")))
-    time.sleep(2) # Brief pause for animations
+    # Wait for the fruit container to load based on your HTML
+    wait.until(EC.presence_of_element_located((By.CLASS_NAME, "grid")))
+    time.sleep(3) # Give extra time for React/Next.js to render
 
-    # 1. Grab the Reset Timer
-    # Gamersberg usually has the timer near the top or inside a specific badge
+    # 1. Timer Logic - Gamersberg uses specific text for the countdown
     try:
-        timer_text = driver.find_element(By.XPATH, "//*[contains(text(), 'h') and contains(text(), 'm')]").text
-        unix_time = get_unix_timestamp(timer_text)
+        # Search for any text containing 'h' and 'm' or the countdown pattern
+        timer_el = driver.find_element(By.XPATH, "//*[contains(text(), ':') and (contains(@class, 'tabular-nums') or contains(@class, 'font-mono'))]")
+        unix_time = get_unix_timestamp(timer_el.text)
         time_display = f"<t:{unix_time}:R>" if unix_time else "Unknown"
     except:
         time_display = "Unknown"
 
-    # 2. Grab the Fruits
+    # 2. Fruit Logic - Using the 'flex-col items-center' from your HTML
     stock_list = []
-    high_value_found = False
+    high_value_alert = False
     
-    # Target common Gamersberg stock item containers
-    items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center, div.bg-secondary")
+    items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center")
     
     for item in items:
         try:
-            name = item.find_element(By.TAG_NAME, "h3").text.strip()
-            price_text = item.find_element(By.XPATH, ".//*[contains(text(), '$')]").text.strip()
+            # Fruit Name is in the bold paragraph
+            name = item.find_element(By.CSS_SELECTOR, "p.font-bold.mt-1").text.strip()
+            # Price is in the paragraph with the dollar icon
+            price_text = item.find_element(By.CSS_SELECTOR, "p.text-sm.font-bold").text.strip()
             
-            # Clean price to check for 1M+ alert
-            numeric_price = int(re.sub(r'[^\d]', '', price_text))
+            # Convert values like 5.00K or 1.20M to numbers for the alert
+            clean_price = price_text.upper()
+            numeric_val = float(re.findall(r"[-+]?\d*\.\d+|\d+", clean_price.replace(',', ''))[0])
             
-            if numeric_price >= 1000000:
-                stock_list.append(f"🔥 **{name}** | `{price_text}`")
-                high_value_found = True
+            if 'M' in clean_price:
+                actual_value = numeric_val * 1_000_000
+            elif 'K' in clean_price:
+                actual_value = numeric_val * 1_000
             else:
-                stock_list.append(f"• {name} | `{price_text}`")
+                actual_value = numeric_val
+
+            if actual_value >= 1000000:
+                stock_list.append(f"🔥 **{name}** | `${price_text}`")
+                high_value_alert = True
+            else:
+                stock_list.append(f"• {name} | `${price_text}`")
         except:
             continue
 
-    return {"time": time_display, "items": stock_list, "alert": high_value_found}
+    return {"time": time_display, "items": stock_list, "alert": high_value_alert}
 
 def run_scraper():
     if not WEBHOOK_URL: return
@@ -78,28 +84,27 @@ def run_scraper():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        # Scrape both tabs
-        normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal", "Normal")
-        mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage", "Mirage")
+        normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal")
+        mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage")
 
-        # Create Embed
         embed = {
             "title": "🎮 Gamersberg Blox Fruits Stock",
             "url": "https://www.gamersberg.com/blox-fruits/stock",
-            "color": 3447003, # Blue
+            "color": 3447003,
             "fields": [
                 {
                     "name": "📦 Normal Stock",
-                    "value": f"Resets {normal['time']}\n" + ("\n".join(normal['items'][:12]) or "No data"),
+                    "value": f"Resets {normal['time']}\n" + ("\n".join(normal['items']) if normal['items'] else "_Empty_"),
                     "inline": True
                 },
                 {
                     "name": "🌌 Mirage Stock",
-                    "value": f"Resets {mirage['time']}\n" + ("\n".join(mirage['items'][:12]) or "No data"),
+                    "value": f"Resets {mirage['time']}\n" + ("\n".join(mirage['items']) if mirage['items'] else "_Empty_"),
                     "inline": True
                 }
             ],
-            "footer": {"text": f"Last Checked: {datetime.datetime.now().strftime('%H:%M:%S')}"}
+            "footer": {"text": "Bot by Gemini • Last Check"},
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
         }
 
         payload = {"embeds": [embed]}
