@@ -13,108 +13,107 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
-def get_unix_timestamp(relative_str):
+def get_unix_time(relative_time_str):
+    """Calculates a future Unix timestamp from H:MM:SS or HH:MM:SS."""
     try:
-        # Matches formats like "00:41:11" or "00h 41m 11s"
-        nums = re.findall(r'\d+', relative_str)
-        if len(nums) == 3:
-            h, m, s = map(int, nums)
-            return int(time.time()) + (h * 3600) + (m * 60) + s
-    except: return None
-    return None
-
-def get_tab_data(driver, url):
-    driver.get(url)
-    wait = WebDriverWait(driver, 20)
-    
-    # Wait for the fruit container to load based on your HTML
-    wait.until(EC.presence_of_element_located((By.CLASS_NAME, "grid")))
-    time.sleep(3) # Give extra time for React/Next.js to render
-
-    # 1. Timer Logic - Gamersberg uses specific text for the countdown
-    try:
-        # Search for any text containing 'h' and 'm' or the countdown pattern
-        timer_el = driver.find_element(By.XPATH, "//*[contains(text(), ':') and (contains(@class, 'tabular-nums') or contains(@class, 'font-mono'))]")
-        unix_time = get_unix_timestamp(timer_el.text)
-        time_display = f"<t:{unix_time}:R>" if unix_time else "Unknown"
+        parts = relative_time_str.split(':')
+        if len(parts) != 3: return None
+        # Handles both 3:54:27 and 03:54:27
+        seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return int(time.time()) + seconds_to_add
     except:
-        time_display = "Unknown"
+        return None
 
-    # 2. Fruit Logic - Using the 'flex-col items-center' from your HTML
-    stock_list = []
-    high_value_alert = False
-    
-    items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center")
-    
-    for item in items:
-        try:
-            # Fruit Name is in the bold paragraph
-            name = item.find_element(By.CSS_SELECTOR, "p.font-bold.mt-1").text.strip()
-            # Price is in the paragraph with the dollar icon
-            price_text = item.find_element(By.CSS_SELECTOR, "p.text-sm.font-bold").text.strip()
-            
-            # Convert values like 5.00K or 1.20M to numbers for the alert
-            clean_price = price_text.upper()
-            numeric_val = float(re.findall(r"[-+]?\d*\.\d+|\d+", clean_price.replace(',', ''))[0])
-            
-            if 'M' in clean_price:
-                actual_value = numeric_val * 1_000_000
-            elif 'K' in clean_price:
-                actual_value = numeric_val * 1_000
-            else:
-                actual_value = numeric_val
-
-            if actual_value >= 1000000:
-                stock_list.append(f"🔥 **{name}** | `${price_text}`")
-                high_value_alert = True
-            else:
-                stock_list.append(f"• {name} | `${price_text}`")
-        except:
-            continue
-
-    return {"time": time_display, "items": stock_list, "alert": high_value_alert}
-
-def run_scraper():
-    if not WEBHOOK_URL: return
+def scrape_fruity_blox():
+    if not WEBHOOK_URL:
+        return
 
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal")
-        mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage")
+        driver.get("https://fruityblox.com/stock")
+        wait = WebDriverWait(driver, 20)
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
 
+        # --- 1. GET THE TIMERS FIRST ---
+        # Normal timer is in the blue container, Mirage is in the purple one
+        try:
+            normal_timer_raw = driver.find_element(By.CSS_SELECTOR, "div.bg-blue-900\/50").text.strip()
+            normal_unix = get_unix_time(normal_timer_raw)
+            normal_time_display = f"⌛ Resets <t:{normal_unix}:R>" if normal_unix else "⌛ Resets: Unknown"
+        except:
+            normal_time_display = "⌛ Resets: Unknown"
+
+        try:
+            mirage_timer_raw = driver.find_element(By.CSS_SELECTOR, "div.bg-purple-900\/50").text.strip()
+            mirage_unix = get_unix_time(mirage_timer_raw)
+            mirage_time_display = f"⌛ Resets <t:{mirage_unix}:R>" if mirage_unix else "⌛ Resets: Unknown"
+        except:
+            mirage_time_display = "⌛ Resets: Unknown"
+
+        # --- 2. GET THE FRUITS ---
+        headers = driver.find_elements(By.TAG_NAME, "h2")
+        fields = []
+        high_value_alert = False
+
+        for header in headers:
+            title = header.text.strip()
+            if "Normal" not in title and "Mirage" not in title:
+                continue
+                
+            # Assign the correct timer based on the header title
+            current_timer = normal_time_display if "Normal" in title else mirage_time_display
+
+            stock_list = []
+            try:
+                grid = header.find_element(By.XPATH, "./following-sibling::div[contains(@class, 'grid')]")
+                cards = grid.find_elements(By.CSS_SELECTOR, "a.block.bg-card")
+                
+                for card in cards:
+                    name = card.find_element(By.TAG_NAME, "h3").text.strip()
+                    price_text = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
+                    
+                    # 1M+ Alert Logic
+                    numeric_val = int(re.sub(r'[^\d]', '', price_text))
+                    if numeric_val >= 1000000:
+                        stock_list.append(f"🔥 **{name}** (`{price_text}`)")
+                        high_value_alert = True
+                    else:
+                        stock_list.append(f"• {name} (`{price_text}`)")
+            except:
+                pass
+            
+            fields.append({
+                "name": f"━━━ {title} ━━━",
+                "value": f"{current_timer}\n" + ("\n".join(stock_list) if stock_list else "_No stock found_"),
+                "inline": True
+            })
+
+        # --- 3. SEND EMBED ---
         embed = {
-            "title": "🎮 Gamersberg Blox Fruits Stock",
-            "url": "https://www.gamersberg.com/blox-fruits/stock",
-            "color": 3447003,
-            "fields": [
-                {
-                    "name": "📦 Normal Stock",
-                    "value": f"Resets {normal['time']}\n" + ("\n".join(normal['items']) if normal['items'] else "_Empty_"),
-                    "inline": True
-                },
-                {
-                    "name": "🌌 Mirage Stock",
-                    "value": f"Resets {mirage['time']}\n" + ("\n".join(mirage['items']) if mirage['items'] else "_Empty_"),
-                    "inline": True
-                }
-            ],
-            "footer": {"text": "Bot by Gemini • Last Check"},
+            "title": "🍎 FruityBlox Live Stock Update",
+            "url": "https://fruityblox.com/stock",
+            "color": 15548997,
+            "fields": fields,
+            "footer": {"text": "FruityBlox Scraper Bot • Fixed Timers"},
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
         }
 
         payload = {"embeds": [embed]}
-        if normal['alert'] or mirage['alert']:
-            payload["content"] = "🚨 **High Value Fruit Found!** @everyone"
+        if high_value_alert:
+            payload["content"] = "🔔 @everyone **HIGH VALUE FRUIT DETECTED!**"
 
         requests.post(WEBHOOK_URL, json=payload)
 
+    except Exception as e:
+        print(f"Error: {e}")
     finally:
         driver.quit()
 
 if __name__ == "__main__":
-    run_scraper()
+    scrape_fruity_blox()
