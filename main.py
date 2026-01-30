@@ -9,6 +9,10 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
+# Custom Emojis from your JSON
+MONEY_EMOJI = "<:money:1456628926276173845>"
+CLOCK_EMOJI = "<:clock:1182328726185312336>"
+
 def get_unix_time(relative_time_str):
     try:
         parts = relative_time_str.strip().split(':')
@@ -53,27 +57,32 @@ def scrape_fruity_blox():
                 for card in cards:
                     name = card.find_element(By.TAG_NAME, "h3").text.strip()
                     price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
-                    val = int(re.sub(r'[^\d]', '', price))
                     
+                    # Recreating the Vulcan JSON Line Style:
+                    # **Name • <:money:ID>`Price`**
+                    line = f"**{name} • {MONEY_EMOJI}`{price}`**"
+                    
+                    # Alert Logic
+                    val = int(re.sub(r'[^\d]', '', price))
                     if val >= 1000000:
-                        stock_lines.append(f"🔥 **{name}** • 🟢 `${price}`")
+                        line = "🔥 " + line
                         high_value_alert = True
-                    else:
-                        stock_lines.append(f"▫️ {name} • `${price}`")
+                    
+                    stock_lines.append(line)
             except: pass
 
             stock_key = "Normal" if "Normal" in title_text else "Mirage"
             
-            # --- THE SUBTEXT FIX ---
-            # Using -# to make the timer line significantly smaller
-            description = "\n".join(stock_lines)
-            description += f"\n──────────────────\n-# 🕒 Stock Change {timers[stock_key]}"
-            
+            # Recreating the Vulcan "Section" look using Embed Description
+            description = f"**Current {stock_key} Stock**\n"
+            description += "─" * 15 + "\n"
+            description += "\n".join(stock_lines) + "\n"
+            description += "─" * 15 + "\n"
+            description += f"-# {CLOCK_EMOJI} **Stock Change in** - {timers[stock_key]}"
+
             embeds.append({
-                "title": f"Current {stock_key} Stock",
                 "description": description,
-                "color": 2829617,
-                "footer": {"text": "FruityBlox Live Stats"}
+                "color": 2829617  # Matches the dark Vulcan theme
             })
 
         payload = {"embeds": embeds}
