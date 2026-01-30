@@ -1,97 +1,76 @@
-import os, requests, datetime, re, time
+import os, re, time, requests
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
+# Get Host IP from GitHub Secrets
+HOST_IP = os.getenv("HOST_IP")
+PORT = "21261"
+TARGET_URL = f"http://{HOST_IP}:{PORT}/update"
 
-# Custom Emojis from your JSON
-MONEY_EMOJI = "<:money:1456628926276173845>"
-CLOCK_EMOJI = "<:clock:1182328726185312336>"
-
-def get_unix_time(relative_time_str):
+def get_unix_time(raw_str):
     try:
-        parts = relative_time_str.strip().split(':')
-        if len(parts) != 3: return None
-        seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-        return int(time.time()) + seconds_to_add
-    except: return None
+        p = raw_str.strip().split(':')
+        return int(time.time()) + (int(p[0])*3600 + int(p[1])*60 + int(p[2]))
+    except: return int(time.time())
 
-def scrape_fruity_blox():
-    if not WEBHOOK_URL: return
+def scrape():
     options = Options()
     options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
+    
     try:
         driver.get("https://fruityblox.com/stock")
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
-
-        timers = {"Normal": "Unknown", "Mirage": "Unknown"}
-        for stock_type in ["Normal", "Mirage"]:
-            try:
-                timer_xpath = f"//h2[contains(text(), '{stock_type}')]/..//span[contains(@class, 'font-mono')]"
-                raw_time = driver.find_element(By.XPATH, timer_xpath).text.strip()
-                unix_ts = get_unix_time(raw_time)
-                if unix_ts:
-                    timers[stock_type] = f"<t:{unix_ts}:R>"
-            except: pass
-
+        time.sleep(5)
+        
         headers = driver.find_elements(By.TAG_NAME, "h2")
-        embeds = []
-        high_value_alert = False
+        embeds_data = []
+        high_value = False
 
         for header in headers:
-            title_text = header.text.strip()
-            if "Normal" not in title_text and "Mirage" not in title_text: continue
+            title = header.text.strip()
+            if "Normal" not in title and "Mirage" not in title: continue
             
-            stock_lines = []
+            # Extract Timer
             try:
-                grid = header.find_element(By.XPATH, "./following-sibling::div[contains(@class, 'grid')]")
-                cards = grid.find_elements(By.CSS_SELECTOR, "a.block.bg-card")
-                for card in cards:
-                    name = card.find_element(By.TAG_NAME, "h3").text.strip()
-                    price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
-                    
-                    # Recreating the Vulcan JSON Line Style:
-                    # **Name • <:money:ID>`Price`**
-                    line = f"**{name} • {MONEY_EMOJI}`{price}`**"
-                    
-                    # Alert Logic
-                    val = int(re.sub(r'[^\d]', '', price))
-                    if val >= 1000000:
-                        line = "🔥 " + line
-                        high_value_alert = True
-                    
-                    stock_lines.append(line)
-            except: pass
+                t_str = driver.find_element(By.XPATH, f"//h2[contains(text(), '{title}')]/..//span[contains(@class, 'font-mono')]").text
+                ts = f"<t:{get_unix_time(t_str)}:R>"
+            except: ts = "Unknown"
 
-            stock_key = "Normal" if "Normal" in title_text else "Mirage"
-            
-            # Recreating the Vulcan "Section" look using Embed Description
-            description = f"**Current {stock_key} Stock**\n"
-            description += "─" * 15 + "\n"
-            description += "\n".join(stock_lines) + "\n"
-            description += "─" * 15 + "\n"
-            description += f"-# {CLOCK_EMOJI} **Stock Change in** - {timers[stock_key]}"
+            # Extract Fruits
+            lines = []
+            grid = header.find_element(By.XPATH, "./following-sibling::div")
+            for card in grid.find_elements(By.CSS_SELECTOR, "a.block.bg-card"):
+                name = card.find_element(By.TAG_NAME, "h3").text.strip()
+                price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
+                val = int(re.sub(r'[^\d]', '', price))
+                
+                line = f"**{name} • `{price}`**"
+                if val >= 1000000:
+                    line = "🔥 " + line
+                    high_value = True
+                lines.append(line)
 
-            embeds.append({
-                "description": description,
-                "color": 2829617  # Matches the dark Vulcan theme
+            embeds_data.append({
+                "description": f"**Current {title}**\n" + "─" * 15 + "\n" + "\n".join(lines) + "\n" + "─" * 15 + f"\n-# **Stock Change** - {ts}",
+                "color": 2829617 
             })
 
-        payload = {"embeds": embeds}
-        if high_value_alert:
-            payload["content"] = "🚨 **High Value Stock Alert!** @everyone"
+        payload = {
+            "content": "🚨 @everyone **High Value Stock Alert!**" if high_value else "",
+            "embeds": embeds_data
+        }
+        
+        response = requests.post(TARGET_URL, json=payload, timeout=15)
+        print(f"Status: {response.status_code} - Data sent to host.")
 
-        requests.post(WEBHOOK_URL, json=payload)
     finally:
         driver.quit()
 
 if __name__ == "__main__":
-    scrape_fruity_blox()
+    scrape()
