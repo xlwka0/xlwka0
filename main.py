@@ -13,92 +13,103 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
-def get_unix_time(relative_time_str):
-    """Calculates a future Unix timestamp from an HH:MM:SS string."""
+def get_unix_timestamp(relative_str):
+    """Parses time strings like '01h 05m 10s' or '01:05:10' into Discord Unix."""
     try:
-        parts = relative_time_str.split(':')
-        if len(parts) != 3: return None
-        seconds_to_add = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-        return int(time.time()) + seconds_to_add
+        # Extract all numbers from the string
+        nums = re.findall(r'\d+', relative_str)
+        if len(nums) == 3:
+            h, m, s = map(int, nums)
+            total_seconds = (h * 3600) + (m * 60) + s
+            return int(time.time()) + total_seconds
     except:
         return None
+    return None
 
-def scrape_fruity_blox():
+def get_tab_data(driver, url, label):
+    driver.get(url)
+    wait = WebDriverWait(driver, 15)
+    
+    # Wait for the stock items to load
+    wait.until(EC.presence_of_element_located((By.TAG_NAME, "img")))
+    time.sleep(2) # Brief pause for animations
+
+    # 1. Grab the Reset Timer
+    # Gamersberg usually has the timer near the top or inside a specific badge
+    try:
+        timer_text = driver.find_element(By.XPATH, "//*[contains(text(), 'h') and contains(text(), 'm')]").text
+        unix_time = get_unix_timestamp(timer_text)
+        time_display = f"<t:{unix_time}:R>" if unix_time else "Unknown"
+    except:
+        time_display = "Unknown"
+
+    # 2. Grab the Fruits
+    stock_list = []
+    high_value_found = False
+    
+    # Target common Gamersberg stock item containers
+    items = driver.find_elements(By.CSS_SELECTOR, "div.flex.flex-col.items-center, div.bg-secondary")
+    
+    for item in items:
+        try:
+            name = item.find_element(By.TAG_NAME, "h3").text.strip()
+            price_text = item.find_element(By.XPATH, ".//*[contains(text(), '$')]").text.strip()
+            
+            # Clean price to check for 1M+ alert
+            numeric_price = int(re.sub(r'[^\d]', '', price_text))
+            
+            if numeric_price >= 1000000:
+                stock_list.append(f"🔥 **{name}** | `{price_text}`")
+                high_value_found = True
+            else:
+                stock_list.append(f"• {name} | `{price_text}`")
+        except:
+            continue
+
+    return {"time": time_display, "items": stock_list, "alert": high_value_found}
+
+def run_scraper():
     if not WEBHOOK_URL: return
 
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        driver.get("https://fruityblox.com/stock")
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "h2")))
+        # Scrape both tabs
+        normal = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=normal", "Normal")
+        mirage = get_tab_data(driver, "https://www.gamersberg.com/blox-fruits/stock?tab=mirage", "Mirage")
 
-        headers = driver.find_elements(By.TAG_NAME, "h2")
-        fields = []
-        high_value_alert = False
-
-        for header in headers:
-            title = header.text.strip()
-            if "Normal" not in title and "Mirage" not in title: continue
-                
-            # Timer Logic
-            try:
-                parent = header.find_element(By.XPATH, "./..")
-                raw_time = parent.find_element(By.CLASS_NAME, "tabular-nums").text.strip()
-                unix_reset = get_unix_time(raw_time)
-                time_display = f"⌛ Resets <t:{unix_reset}:R>" if unix_reset else "⌛ Resets: Unknown"
-            except:
-                time_display = "⌛ Resets: Unknown"
-
-            # Fruit Logic
-            stock_lines = []
-            try:
-                grid = header.find_element(By.XPATH, "./following-sibling::div[contains(@class, 'grid')]")
-                cards = grid.find_elements(By.CSS_SELECTOR, "a.block.bg-card")
-                for card in cards:
-                    name = card.find_element(By.TAG_NAME, "h3").text.strip()
-                    price = card.find_element(By.CLASS_NAME, "text-green-400").text.strip()
-                    
-                    val = int(re.sub(r'[^\d]', '', price))
-                    if val >= 1000000:
-                        stock_lines.append(f"🔥 **{name}** (`{price}`) ")
-                        high_value_alert = True
-                    else:
-                        stock_lines.append(f"• {name} (`{price}`)")
-            except:
-                pass
-            
-            # Add section as an Embed Field
-            fields.append({
-                "name": f"━━━ {title} ━━━",
-                "value": f"{time_display}\n" + ("\n".join(stock_lines) if stock_lines else "_No stock_"),
-                "inline": True
-            })
-
-        # Final Embed Structure
+        # Create Embed
         embed = {
-            "title": "🍎 FruityBlox Stock Update",
-            "color": 15548997, # Red-ish color
-            "fields": fields,
-            "footer": {"text": "FruityBlox Scraper Bot • GitHub Actions"},
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+            "title": "🎮 Gamersberg Blox Fruits Stock",
+            "url": "https://www.gamersberg.com/blox-fruits/stock",
+            "color": 3447003, # Blue
+            "fields": [
+                {
+                    "name": "📦 Normal Stock",
+                    "value": f"Resets {normal['time']}\n" + ("\n".join(normal['items'][:12]) or "No data"),
+                    "inline": True
+                },
+                {
+                    "name": "🌌 Mirage Stock",
+                    "value": f"Resets {mirage['time']}\n" + ("\n".join(mirage['items'][:12]) or "No data"),
+                    "inline": True
+                }
+            ],
+            "footer": {"text": f"Last Checked: {datetime.datetime.now().strftime('%H:%M:%S')}"}
         }
 
         payload = {"embeds": [embed]}
-        if high_value_alert:
-            payload["content"] = "🔔 @everyone **High Value Fruit in Stock!**"
+        if normal['alert'] or mirage['alert']:
+            payload["content"] = "🚨 **High Value Fruit Found!** @everyone"
 
         requests.post(WEBHOOK_URL, json=payload)
 
-    except Exception as e:
-        print(f"Error: {e}")
     finally:
         driver.quit()
 
 if __name__ == "__main__":
-    scrape_fruity_blox()
+    run_scraper()
