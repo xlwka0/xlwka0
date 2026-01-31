@@ -1,4 +1,4 @@
-import os, re, time, requests
+import os, re, time, requests, datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -16,7 +16,7 @@ def get_unix_time(raw_str):
     except: return int(time.time())
 
 def scrape():
-    print(f"🚀 Starting Categorized Scraper... Targeting Host: {TARGET_URL}")
+    print(f"🚀 Starting Deep-Search Scraper... Targeting Host: {TARGET_URL}")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -38,23 +38,28 @@ def scrape():
             let isNormal = h2.innerText.includes('Normal');
             
             if (isNormal || isMirage) {
-                // Get Timer
-                let timer = h2.parentElement.querySelector('.font-mono')?.innerText || "00:00:00";
+                let parent = h2.parentElement;
+                let timer = parent.querySelector('.font-mono')?.innerText || "00:00:00";
                 if (isNormal) results.normalTimer = timer;
                 else results.mirageTimer = timer;
 
-                // Get Fruits in the grid immediately following this header
-                let grid = h2.nextElementSibling;
-                if (grid) {
-                    grid.querySelectorAll('a').forEach(card => {
-                        let name = card.querySelector('h3')?.innerText;
-                        let price = card.querySelector('.text-green-400')?.innerText;
-                        if (name && price) {
-                            let item = { name: name.trim(), price: price.trim() };
-                            if (isNormal) results.normal.push(item);
-                            else results.mirage.push(item);
-                        }
-                    });
+                // Search downwards for the next 'div' that contains fruit cards
+                let current = h2.nextElementSibling;
+                while (current) {
+                    let cards = current.querySelectorAll('a[href*="/items/"]');
+                    if (cards.length > 0) {
+                        cards.forEach(card => {
+                            let name = card.querySelector('h3')?.innerText;
+                            let price = card.querySelector('.text-green-400')?.innerText;
+                            if (name && price) {
+                                let item = { name: name.trim(), price: price.trim() };
+                                if (isNormal) results.normal.push(item);
+                                else results.mirage.push(item);
+                            }
+                        });
+                        break; // Stop searching once we found the grid
+                    }
+                    current = current.nextElementSibling;
                 }
             }
         });
@@ -71,8 +76,10 @@ def scrape():
             display_name = "Normal" if category == 'normal' else "Mirage"
             
             if not fruits:
+                print(f"⚠️ No fruits found for {display_name}")
                 continue
 
+            print(f"✅ Found {len(fruits)} items for {display_name}")
             lines = []
             for f in fruits:
                 name = f['name']
@@ -86,17 +93,27 @@ def scrape():
                 lines.append(line)
 
             ts = f"<t:{get_unix_time(timer_text)}:R>"
-            embeds_data.append({
-                "description": f"**Current {display_name} Stock**\n------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
-                "color": 2829617 if category == 'normal' else 10181046 # Mirage gets a purple-ish color
-            })
+            
+            # Create the embed dictionary
+            embed = {
+                "title": f"Current {display_name} Stock",
+                "description": "------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
+                "color": 2829617 if category == 'normal' else 10181046
+            }
+            
+            # Add timestamp footer to the last embed
+            if category == 'mirage' or (category == 'normal' and not data['mirage']):
+                now = datetime.datetime.now().strftime("%I:%M %p")
+                embed["footer"] = {"text": f"Last Updated: {now} | Powered by GitHub"}
+                
+            embeds_data.append(embed)
 
         if embeds_data:
             payload = {"content": "🚨 @everyone **High Value!**" if high_value_alert else "", "embeds": embeds_data}
             requests.post(TARGET_URL, json=payload, timeout=20)
             print("📡 Sorted data sent successfully!")
         else:
-            print("❌ Found headers but failed to find fruits in those specific grids.")
+            print("❌ Absolute failure: Headers found but grids were empty after deep search.")
 
     finally:
         driver.quit()
