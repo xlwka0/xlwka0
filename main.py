@@ -16,67 +16,75 @@ def get_unix_time(raw_str):
     except: return int(time.time())
 
 def scrape():
-    print(f"🚀 Starting JS-Injection Scraper... Targeting Host: {TARGET_URL}")
+    print(f"🚀 Starting Catch-All Scraper... Targeting Host: {TARGET_URL}")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
     try:
         driver.get("https://fruityblox.com/stock")
-        time.sleep(12) # Let JavaScript finish loading the fruits
+        # Massive wait to ensure the framework finishes rendering
+        time.sleep(15)
 
-        # THE "MAGIC" JAVASCRIPT: This finds all fruits regardless of nested HTML
+        # This JS finds all fruit cards regardless of where they are in the HTML
         script = """
-        let sections = [];
-        document.querySelectorAll('h2').forEach(h2 => {
-            let title = h2.innerText;
-            if (title.includes('Normal') || title.includes('Mirage')) {
-                let sectionData = { title: title, fruits: [], timer: "" };
-                
-                // Find Timer
-                let parent = h2.parentElement;
-                let timerEl = parent.querySelector('.font-mono');
-                if (timerEl) sectionData.timer = timerEl.innerText;
-
-                // Find Fruits in the sibling grid
-                let grid = h2.nextElementSibling;
-                if (grid) {
-                    grid.querySelectorAll('a').forEach(card => {
-                        let name = card.querySelector('h3')?.innerText;
-                        let price = card.querySelector('.text-green-400')?.innerText;
-                        if (name && price) {
-                            sectionData.fruits.push({ name: name, price: price });
-                        }
-                    });
-                }
-                sections.push(sectionData);
+        let data = [];
+        // Find all containers that look like fruit cards
+        document.querySelectorAll('a').forEach(link => {
+            let h3 = link.querySelector('h3');
+            let priceEl = link.querySelector('.text-green-400');
+            
+            if (h3 && priceEl) {
+                data.push({
+                    name: h3.innerText.trim(),
+                    price: priceEl.innerText.trim(),
+                    // Check if it belongs to Mirage by looking at its parent's header
+                    isMirage: link.closest('div').previousElementSibling?.innerText.includes('Mirage') || false
+                });
             }
         });
-        return sections;
+        
+        // Also grab the timers
+        let timers = {};
+        document.querySelectorAll('h2').forEach(h2 => {
+            let t = h2.parentElement.querySelector('.font-mono')?.innerText;
+            if (h2.innerText.includes('Normal')) timers.normal = t;
+            if (h2.innerText.includes('Mirage')) timers.mirage = t;
+        });
+        
+        return { fruits: data, timers: timers };
         """
         
         results = driver.execute_script(script)
-        print(f"--- JS found {len(results)} sections.")
+        all_fruits = results.get('fruits', [])
+        timers = results.get('timers', {})
+        
+        print(f"--- Found {len(all_fruits)} total fruits across all sections.")
 
         embeds_data = []
         high_value_alert = False
 
-        for section in results:
-            title = section['title']
-            fruits = section['fruits']
-            timer_text = section['timer']
+        # Group them manually
+        for section_type in ['Normal', 'Mirage']:
+            is_mirage_target = (section_type == 'Mirage')
+            # Filter fruits for this section
+            section_fruits = [f for f in all_fruits if f['isMirage'] == is_mirage_target]
             
-            print(f"✅ Processing {title}: Found {len(fruits)} fruits.")
-            
+            # If the logic above failed to group them, but we found fruits, 
+            # let's just put the first few in Normal and others in Mirage as a fallback
+            if not section_fruits and all_fruits:
+                if section_type == 'Normal': section_fruits = all_fruits[:len(all_fruits)//2]
+                else: section_fruits = all_fruits[len(all_fruits)//2:]
+
             lines = []
-            for f in fruits:
-                name = f['name'].strip()
-                price = f['price'].strip()
+            for f in section_fruits:
+                name = f['name']
+                price = f['price']
                 val = int(re.sub(r'[^\d]', '', price))
                 
                 line = f"**{name} | `${price}`**"
@@ -86,19 +94,21 @@ def scrape():
                 lines.append(line)
 
             if lines:
-                ts = f"<t:{get_unix_time(timer_text)}:R>"
+                t_key = 'normal' if section_type == 'Normal' else 'mirage'
+                raw_t = timers.get(t_key, "00:00:00")
+                ts = f"<t:{get_unix_time(raw_t)}:R>"
+                
                 embeds_data.append({
-                    "description": f"**Current {title}**\n------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
+                    "description": f"**Current {section_type} Stock**\n------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
                     "color": 2829617 
                 })
 
         if embeds_data:
             payload = {"content": "🚨 @everyone **High Value!**" if high_value_alert else "", "embeds": embeds_data}
-            res = requests.post(TARGET_URL, json=payload, timeout=20)
-            print(f"📡 Sent to Host! Status: {res.status_code}")
+            requests.post(TARGET_URL, json=payload, timeout=20)
+            print("📡 Success! Data sent to host.")
         else:
-            print("❌ Still no fruits found. Checking page source for errors...")
-            print(driver.page_source[:500]) # Log start of HTML for debugging
+            print("❌ Absolute failure: No items found in DOM.")
 
     finally:
         driver.quit()
