@@ -16,7 +16,7 @@ def get_unix_time(raw_str):
     except: return int(time.time())
 
 def scrape():
-    print(f"🚀 Starting Catch-All Scraper... Targeting Host: {TARGET_URL}")
+    print(f"🚀 Starting Categorized Scraper... Targeting Host: {TARGET_URL}")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -28,61 +28,53 @@ def scrape():
     
     try:
         driver.get("https://fruityblox.com/stock")
-        # Massive wait to ensure the framework finishes rendering
         time.sleep(15)
 
-        # This JS finds all fruit cards regardless of where they are in the HTML
         script = """
-        let data = [];
-        // Find all containers that look like fruit cards
-        document.querySelectorAll('a').forEach(link => {
-            let h3 = link.querySelector('h3');
-            let priceEl = link.querySelector('.text-green-400');
+        let results = { normal: [], mirage: [], normalTimer: "", mirageTimer: "" };
+        
+        document.querySelectorAll('h2').forEach(h2 => {
+            let isMirage = h2.innerText.includes('Mirage');
+            let isNormal = h2.innerText.includes('Normal');
             
-            if (h3 && priceEl) {
-                data.push({
-                    name: h3.innerText.trim(),
-                    price: priceEl.innerText.trim(),
-                    // Check if it belongs to Mirage by looking at its parent's header
-                    isMirage: link.closest('div').previousElementSibling?.innerText.includes('Mirage') || false
-                });
+            if (isNormal || isMirage) {
+                // Get Timer
+                let timer = h2.parentElement.querySelector('.font-mono')?.innerText || "00:00:00";
+                if (isNormal) results.normalTimer = timer;
+                else results.mirageTimer = timer;
+
+                // Get Fruits in the grid immediately following this header
+                let grid = h2.nextElementSibling;
+                if (grid) {
+                    grid.querySelectorAll('a').forEach(card => {
+                        let name = card.querySelector('h3')?.innerText;
+                        let price = card.querySelector('.text-green-400')?.innerText;
+                        if (name && price) {
+                            let item = { name: name.trim(), price: price.trim() };
+                            if (isNormal) results.normal.push(item);
+                            else results.mirage.push(item);
+                        }
+                    });
+                }
             }
         });
-        
-        // Also grab the timers
-        let timers = {};
-        document.querySelectorAll('h2').forEach(h2 => {
-            let t = h2.parentElement.querySelector('.font-mono')?.innerText;
-            if (h2.innerText.includes('Normal')) timers.normal = t;
-            if (h2.innerText.includes('Mirage')) timers.mirage = t;
-        });
-        
-        return { fruits: data, timers: timers };
+        return results;
         """
         
-        results = driver.execute_script(script)
-        all_fruits = results.get('fruits', [])
-        timers = results.get('timers', {})
-        
-        print(f"--- Found {len(all_fruits)} total fruits across all sections.")
-
+        data = driver.execute_script(script)
         embeds_data = []
         high_value_alert = False
 
-        # Group them manually
-        for section_type in ['Normal', 'Mirage']:
-            is_mirage_target = (section_type == 'Mirage')
-            # Filter fruits for this section
-            section_fruits = [f for f in all_fruits if f['isMirage'] == is_mirage_target]
+        for category in ['normal', 'mirage']:
+            fruits = data[category]
+            timer_text = data[f'{category}Timer']
+            display_name = "Normal" if category == 'normal' else "Mirage"
             
-            # If the logic above failed to group them, but we found fruits, 
-            # let's just put the first few in Normal and others in Mirage as a fallback
-            if not section_fruits and all_fruits:
-                if section_type == 'Normal': section_fruits = all_fruits[:len(all_fruits)//2]
-                else: section_fruits = all_fruits[len(all_fruits)//2:]
+            if not fruits:
+                continue
 
             lines = []
-            for f in section_fruits:
+            for f in fruits:
                 name = f['name']
                 price = f['price']
                 val = int(re.sub(r'[^\d]', '', price))
@@ -93,22 +85,18 @@ def scrape():
                     high_value_alert = True
                 lines.append(line)
 
-            if lines:
-                t_key = 'normal' if section_type == 'Normal' else 'mirage'
-                raw_t = timers.get(t_key, "00:00:00")
-                ts = f"<t:{get_unix_time(raw_t)}:R>"
-                
-                embeds_data.append({
-                    "description": f"**Current {section_type} Stock**\n------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
-                    "color": 2829617 
-                })
+            ts = f"<t:{get_unix_time(timer_text)}:R>"
+            embeds_data.append({
+                "description": f"**Current {display_name} Stock**\n------------------\n" + "\n".join(lines) + "\n------------------\n" + f"-# **Stock Change** - {ts}",
+                "color": 2829617 if category == 'normal' else 10181046 # Mirage gets a purple-ish color
+            })
 
         if embeds_data:
             payload = {"content": "🚨 @everyone **High Value!**" if high_value_alert else "", "embeds": embeds_data}
             requests.post(TARGET_URL, json=payload, timeout=20)
-            print("📡 Success! Data sent to host.")
+            print("📡 Sorted data sent successfully!")
         else:
-            print("❌ Absolute failure: No items found in DOM.")
+            print("❌ Found headers but failed to find fruits in those specific grids.")
 
     finally:
         driver.quit()
