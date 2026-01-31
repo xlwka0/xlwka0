@@ -18,67 +18,79 @@ def get_unix_time(raw_str):
     except: return int(time.time())
 
 def scrape():
-    print(f"🚀 Starting Scraper... Targeting Host: {TARGET_URL}")
+    print(f"🚀 Starting Stealth Scraper... Targeting Host: {TARGET_URL}")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     
+    # STEALTH SETTINGS: Make GitHub look like a real Chrome browser
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
+    # Further hide Selenium
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
     try:
         driver.get("https://fruityblox.com/stock")
-        # Wait for the specific fruit card class from your snippet
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.CLASS_NAME, "bg-card")))
         
-        # Give JS a moment to populate text
-        time.sleep(5) 
+        # Give the page a massive 15-second cushion to load behind the bot-check
+        time.sleep(15)
+        
+        # Check if we are stuck on a Cloudflare page
+        if "Just a moment" in driver.title or "Verify you are human" in driver.page_source:
+            print("❌ Stuck on Cloudflare verification. Retrying with different logic...")
+            # Fallback: try to find any h2 even if cards aren't ready
         
         headers = driver.find_elements(By.TAG_NAME, "h2")
+        print(f"--- Found {len(headers)} headers on page.")
+        
         embeds_data = []
-        high_value = False
+        high_value_alert = False
 
         for header in headers:
             title = header.text.strip()
             if "Normal" not in title and "Mirage" not in title:
                 continue
             
-            print(f"✅ Found Section: {title}")
+            print(f"✅ Processing: {title}")
             
-            # Find the Timer based on your Mirage snippet (font-mono tabular-nums)
+            # Timer
             try:
-                parent_div = header.find_element(By.XPATH, "./..")
-                timer_text = parent_div.find_element(By.CLASS_NAME, "font-mono").text.strip()
+                parent = header.find_element(By.XPATH, "..")
+                timer_text = parent.find_element(By.CLASS_NAME, "font-mono").text.strip()
                 ts = f"<t:{get_unix_time(timer_text)}:R>"
-            except:
-                ts = "Unknown"
+            except: ts = "Unknown"
 
             lines = []
-            # Move to the grid and find all fruit cards
+            # Find the fruit grid
             try:
                 grid = header.find_element(By.XPATH, "./following-sibling::div")
-                cards = grid.find_elements(By.CSS_SELECTOR, "a.bg-card")
+                # Look for ANY link inside the grid
+                cards = grid.find_elements(By.TAG_NAME, "a")
                 
                 for card in cards:
-                    # Target the H3 for name and text-green-400 for price as seen in your snippet
-                    name = card.find_element(By.TAG_NAME, "h3").text.strip()
-                    price_element = card.find_element(By.CLASS_NAME, "text-green-400")
-                    price = price_element.text.strip()
-                    
-                    if not name or not price: continue
-                    
-                    # Clean price (e.g., "5,000" -> 5000)
-                    val = int(re.sub(r'[^\d]', '', price))
-                    line = f"**{name} | `${price}`**"
-                    
-                    if val >= 1000000:
-                        line = "🔥 " + line
-                        high_value = True
-                    lines.append(line)
-            except Exception as e:
-                print(f"Error parsing fruits in {title}: {e}")
+                    try:
+                        name = card.find_element(By.TAG_NAME, "h3").text.strip()
+                        # Extract price from the green text
+                        price_el = card.find_element(By.CLASS_NAME, "text-green-400")
+                        price = price_el.text.strip()
+                        
+                        if name and price:
+                            val = int(re.sub(r'[^\d]', '', price))
+                            line = f"**{name} | `${price}`**"
+                            if val >= 1000000:
+                                line = "🔥 " + line
+                                high_value_alert = True
+                            lines.append(line)
+                            print(f"      > {name}: {price}")
+                    except: continue
+            except: continue
 
             if lines:
                 embeds_data.append({
@@ -87,12 +99,14 @@ def scrape():
                 })
 
         if embeds_data:
-            payload = {"content": "🚨 @everyone **High Value!**" if high_value else "", "embeds": embeds_data}
-            response = requests.post(TARGET_URL, json=payload, timeout=20)
-            print(f"📡 Data sent to Host. Status: {response.status_code}")
+            payload = {"content": "🚨 @everyone **High Value!**" if high_value_alert else "", "embeds": embeds_data}
+            res = requests.post(TARGET_URL, json=payload, timeout=20)
+            print(f"📡 Data Sent! Response: {res.status_code}")
         else:
-            print("❌ Found headers but failed to extract fruit names/prices.")
+            print("❌ No fruit data extracted. Website might be blocking the automated script.")
 
+    except Exception as e:
+        print(f"❌ Scraper Error: {e}")
     finally:
         driver.quit()
 
