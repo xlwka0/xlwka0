@@ -82,17 +82,6 @@ const xlwka = {
   <img src="https://github-readme-streak-stats.herokuapp.com/?user=xlwka0&theme=tokyonight&hide_border=true&background=0D1117&ring=7aa2f7&fire=ff9e64&currStreakLabel=7aa2f7" alt="xlwka0 Streak" width="97%" />
 </p>
 
-</div>
-
----
-
-<div align="center">
-
-### 🤝 Connect & Collaborate
-
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com)
-[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/xlwka0)
-
 <br/>
 
 *⚡ Crafted with passion for clean code & high performance.*
