@@ -74,12 +74,11 @@ const xlwka = {
 <div align="center">
 
 <p align="center">
-  <img src="https://github-stats-extended.vercel.app/api?username=xlwka0&show_icons=true&theme=tokyonight&hide_border=true&bg_color=0D1117&title_color=7aa2f7&icon_color=bb9af7&text_color=a9b1d6" alt="xlwka0 Stats" width="48%" />
-  <img src="https://github-stats-extended.vercel.app/api/top-langs/?username=xlwka0&layout=compact&theme=tokyonight&hide_border=true&bg_color=0D1117&title_color=7aa2f7&text_color=a9b1d6" alt="Top Languages" width="48%" />
+  <img src="https://github-stats-extended.vercel.app/api?username=xlwka0&show_icons=true&theme=tokyonight&hide_border=true&bg_color=0D1117&title_color=7aa2f7&icon_color=bb9af7&text_color=a9b1d6" alt="xlwka0 Stats" width="490px" />
 </p>
 
 <p align="center">
-  <img src="https://github-readme-streak-stats.herokuapp.com/?user=xlwka0&theme=tokyonight&hide_border=true&background=0D1117&ring=7aa2f7&fire=ff9e64&currStreakLabel=7aa2f7" alt="xlwka0 Streak" width="97%" />
+  <img src="https://github-readme-streak-stats.herokuapp.com/?user=xlwka0&theme=tokyonight&hide_border=true&background=0D1117&ring=7aa2f7&fire=ff9e64&currStreakLabel=7aa2f7" alt="xlwka0 Streak" width="490px" />
 </p>
 
 <br/>
